@@ -3,40 +3,30 @@
 """A python script to perform watermark embedding/detection
    in the wavelet domain."""
 
-# Copyright (C) 2020 by Akira TAMAMORI
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import windows
 import pywt
+import matplotlib.pyplot as plt
 
-HOST_SIGNAL_FILE = "bass_half.wav"  # 透かし埋め込み先のファイル
-WATERMARK_SIGNAL_FILE = "wmed_signal.wav"           # 透かしを埋め込んだファイル
-PSEUDO_RAND_FILE = 'pseudo_rand.dat'                # 疑似乱数列のファイル
-WATERMARK_ORIGINAL_FILE = 'watermark_ori.dat'       # オリジナルの透かし信号
+# original file
+HOST_SIGNAL_FILE = "PS8Raw.wav"  # 透かし埋め込み先のファイル
+# output watermarked file
+WATERMARK_SIGNAL_FILE = "wmed_signal.wav"  # 透かしを埋め込んだファイル
+# File of pseudorandom number sequence
+# PSEUDO_RAND_FILE = "pseudo_rand.dat"  # 疑似乱数列のファイル
+# Original watermark signal
+WATERMARK_ORIGINAL_FILE = "watermark_ori.dat"  # オリジナルの透かし信号
 
-REP_CODE = True                 # 繰り返し埋め込みを使う
-FRAME_LENGTH = 2048             # フレーム長
-CONTROL_STRENGTH = 1000         # 埋め込み強度
-OVERLAP = 0.5                   # フレーム分析のオーバーラップ率 (固定)
-NUM_REPS = 3                    # 埋め込みの繰り返し数
+REP_CODE = True  # 繰り返し埋め込みを使う
+FRAME_LENGTH = 2048  # フレーム長
+CONTROL_STRENGTH = 1000  # 埋め込み強度
+OVERLAP = 0.5  # フレーム分析のオーバーラップ率 (固定)
+NUM_REPS = 3  # 埋め込みの繰り返し数
 
-WAVELET_BASIS = 'db4'
+WAVELET_BASIS = "db4"
 WAVELET_LEVEL = 3
-WAVELET_MODE = 'symmetric'
+WAVELET_MODE = "symmetric"
 THRESHOLD = 0.0
 
 
@@ -85,11 +75,11 @@ def embed():
     effective_nbit = int(effective_nbit)
     embed_nbit = int(embed_nbit)
 
-    # オリジナルの透かし信号を作成（0と1のビット列）
+    # Create the original watermark signal (a sequence of 0s and 1s)
     wmark_original = np.random.randint(2, size=int(effective_nbit))
 
     # オリジナルの透かし信号を保存
-    with open(WATERMARK_ORIGINAL_FILE, 'w') as f:
+    with open(WATERMARK_ORIGINAL_FILE, "w") as f:
         for d in wmark_original:
             f.write("%d\n" % d)
 
@@ -108,11 +98,13 @@ def embed():
     wmed_signal = np.zeros((frame_shift * embed_nbit))  # watermarked signal
     prev = np.zeros((FRAME_LENGTH))
     for i in range(embed_nbit):
-        frame = host_signal[pointer: pointer + FRAME_LENGTH]
+        frame = host_signal[pointer : pointer + FRAME_LENGTH]
 
         # Wavelet係数を計算
-        coeffs = pywt.wavedec(data=frame, wavelet=WAVELET_BASIS,
-                              level=WAVELET_LEVEL, mode=WAVELET_MODE)
+        coeffs = pywt.wavedec(
+            data=frame, wavelet=WAVELET_BASIS, level=WAVELET_LEVEL, mode=WAVELET_MODE
+        )
+        # print(f'before: {coeffs[0][0]}')
 
         # 透かしの埋め込み強度を平均と同じオーダーに設定する（adaptive）
         # coef_size = int(np.log10(np.abs(np.mean(coeffs[0])))) + 1
@@ -121,20 +113,29 @@ def embed():
         # 透かしの埋め込み
         if wmark_extended[count] == 1:
             coeffs[0] = coeffs[0] - np.mean(coeffs[0]) + alpha
+            # coeffs[0] *= 30
         else:
             coeffs[0] = coeffs[0] - np.mean(coeffs[0]) - alpha
+            # coeffs[0] *= 30
 
-        # 再構成
-        wmarked_frame = pywt.waverec(coeffs=coeffs, wavelet=WAVELET_BASIS,
-                                     mode=WAVELET_MODE)
+        print(f"{len(coeffs)}*{len(coeffs[0])}")
+        # print(f'after: {coeffs[0][0]}')
+        # print()
+
+        # reconstruct the signal from its wavelet coeffs
+        wmarked_frame = pywt.waverec(
+            coeffs=coeffs, wavelet=WAVELET_BASIS, mode=WAVELET_MODE
+        )
 
         # 窓をかける (Hann window)
         wmarked_frame = wmarked_frame * windows.hann(FRAME_LENGTH)
 
-        wmed_signal[frame_shift * i: frame_shift * (i+1)] = \
-            np.concatenate((prev[frame_shift:FRAME_LENGTH] +
-                            wmarked_frame[0:overlap_length],
-                            wmarked_frame[overlap_length:frame_shift]))
+        wmed_signal[frame_shift * i : frame_shift * (i + 1)] = np.concatenate(
+            (
+                prev[frame_shift:FRAME_LENGTH] + wmarked_frame[0:overlap_length],
+                wmarked_frame[overlap_length:frame_shift],
+            )
+        )
 
         prev = wmarked_frame
         count = count + 1
@@ -142,10 +143,37 @@ def embed():
 
     # ホスト信号の残りと結合
     wmed_signal = np.concatenate(
-        (wmed_signal, host_signal[len(wmed_signal): signal_len]))
+        (wmed_signal, host_signal[len(wmed_signal) : signal_len])
+    )
+
+    print(np.mean(host_signal))
+    print(np.mean(wmed_signal))
+    wmed_signal += np.mean(host_signal) - np.mean(wmed_signal)
+    wmed_signal /= np.max(wmed_signal)
+    wmed_signal *= np.max(host_signal) * 100
 
     # 透かしが埋め込まれた信号をwavとして保存
     wmed_signal = wmed_signal.astype(np.int16)  # convert float into integer
+
+    ##############################################################################
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        range(len(host_signal)), host_signal, label="Original Signal", color="blue"
+    )
+    plt.plot(
+        range(len(wmed_signal)),
+        wmed_signal,
+        label="Scaled Watermarked Signal",
+        color="red",
+        alpha=0.7,
+    )
+    plt.title("Comparison of Original and Scaled Watermarked Signals")
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Amplitude")
+    plt.legend()
+    plt.show()
+    ##############################################################################
+
     wavfile.write(WATERMARK_SIGNAL_FILE, sr, wmed_signal)
 
 
@@ -161,7 +189,7 @@ def detect():
     signal_len = len(eval_signal)
 
     # オリジナルの透かし信号をロード
-    with open(WATERMARK_ORIGINAL_FILE, 'r') as f:
+    with open(WATERMARK_ORIGINAL_FILE, "r") as f:
         wmark_original = f.readlines()
     wmark_original = np.array([float(w.rstrip()) for w in wmark_original])
 
@@ -184,7 +212,7 @@ def detect():
     embed_nbit = int(embed_nbit)
 
     # オリジナルの透かし信号をロード
-    with open(WATERMARK_ORIGINAL_FILE, 'r') as f:
+    with open(WATERMARK_ORIGINAL_FILE, "r") as f:
         wmark_original = f.readlines()
     wmark_original = np.array([int(w.rstrip()) for w in wmark_original])
 
@@ -192,12 +220,15 @@ def detect():
     pointer = 0
     detected_bit = np.zeros(embed_nbit)
     for i in range(embed_nbit):
-        wmarked_frame = eval_signal[pointer: pointer + FRAME_LENGTH]
+        wmarked_frame = eval_signal[pointer : pointer + FRAME_LENGTH]
 
         # wavelet decomposition
         wmarked_coeffs = pywt.wavedec(
-            data=wmarked_frame, wavelet=WAVELET_BASIS, level=WAVELET_LEVEL,
-            mode=WAVELET_MODE)
+            data=wmarked_frame,
+            wavelet=WAVELET_BASIS,
+            level=WAVELET_LEVEL,
+            mode=WAVELET_MODE,
+        )
 
         thres = np.sum(wmarked_coeffs[0])
 
@@ -215,9 +246,9 @@ def detect():
         for i in range(effective_nbit):
 
             # ビットを集計（平均値）
-            ave = np.sum(detected_bit[count:count + NUM_REPS]) / NUM_REPS
+            ave = np.sum(detected_bit[count : count + NUM_REPS]) / NUM_REPS
 
-            if ave >= 0.5:      # 過半数
+            if ave >= 0.5:  # 過半数
                 wmark_recovered[i] = 1
             else:
                 wmark_recovered[i] = 0
@@ -227,27 +258,28 @@ def detect():
         wmark_recovered = detected_bit
 
     # ビット誤り率を表示
-    denom = np.int(np.sum(np.abs(wmark_recovered - wmark_original)))
-    BER = np.sum(np.abs(wmark_recovered - wmark_original)) / \
-        effective_nbit * 100
-    print(f'BER = {BER} % ({denom} / {effective_nbit})')
+    denom = int(np.sum(np.abs(wmark_recovered - wmark_original)))
+    BER = np.sum(np.abs(wmark_recovered - wmark_original)) / effective_nbit * 100
+    print(f"BER = {BER} % ({denom} / {effective_nbit})")
 
     # SNRを表示
     SNR = 10 * np.log10(
         np.sum(np.square(host_signal.astype(np.float32)))
-        / np.sum(np.square(host_signal.astype(np.float32)
-                           - eval_signal.astype(np.float32))))
-    print(f'SNR = {SNR:.2f} dB')
+        / np.sum(
+            np.square(host_signal.astype(np.float32) - eval_signal.astype(np.float32))
+        )
+    )
+    print(f"SNR = {SNR:.2f} dB")
 
     # bpsを表示
-    print('BPS = {:.2f} bps'.format(embed_nbit / (len(host_signal) / sr)))
+    print("BPS = {:.2f} bps".format(embed_nbit / (len(host_signal) / sr)))
 
 
 def main():
-    """Main routine. """
+    """Main routine."""
     embed()
     detect()
 
 
-if __name__ in '__main__':
+if __name__ in "__main__":
     main()
